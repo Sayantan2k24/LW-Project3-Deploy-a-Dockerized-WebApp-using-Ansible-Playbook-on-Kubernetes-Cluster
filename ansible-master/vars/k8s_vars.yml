@@ -1,0 +1,20 @@
+app_name: flask-app
+app_port: 5000
+app_replicas: 2
+flask_env: production
+
+# Kubernetes Configuration
+k8s_namespace: default
+service_type: LoadBalancer  # For EKS, use LoadBalancer to get AWS ELB
+service_port: 80
+node_port: 30080  # Only used if service_type is NodePort
+
+# EKS Configuration
+eks_cluster_name: my-cluster
+eks_region: ap-south-1
+
+# Resource Limits (suitable for t2.micro nodes)
+container_memory_request: "64Mi"
+container_memory_limit: "128Mi"
+container_cpu_request: "50m"
+container_cpu_limit: "100m"

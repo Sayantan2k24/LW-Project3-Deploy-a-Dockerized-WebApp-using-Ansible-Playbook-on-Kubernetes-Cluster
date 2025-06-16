@@ -1,0 +1,173 @@
+# build-push.yaml
+- name: Build Flask App using Docker inside image_builder container
+  hosts: image_builder
+  become: true
+  vars_files:
+    - vars/docker_vars.yml
+    - dockerhub_creds.yml
+
+  tasks:
+    - name: Ensure app directory exists and give ownership to ansible user
+      file:
+        path: /home/ansible/flaskapp # in remote host
+        state: directory
+        owner: ansible # in remote host
+        group: ansible # in remote host
+        mode: '0755'
+
+    # clone the repo, create the .git folder for the 1st time.
+    - name: Clone repo if not already cloned 
+      git:
+        repo: "{{ app_repo_url }}"
+        dest: /home/ansible/flaskapp
+        version: "{{ app_branch | default('main') }}" # can be HEAD also, can give branch also
+        clone: yes # default #Allow cloning the repo if not already cloned (i.e., if .git folder doesn't exist).
+        update: no # If repo is already present, leave it untouched # protects from accidental fetch/merge.
+      become_user: ansible
+
+    # repo is there # update it with latest remote git changes (github), overwrite local changes
+    - name: Pull latest code
+      git:
+        repo: "{{ app_repo_url }}"
+        dest: /home/ansible/flaskapp
+        version: "{{ app_branch | default('main') }}"
+        update: yes # fetch and reset to the latest commit from remote.
+        clone: yes # default
+        force: yes # Discards any local changes (e.g., if a previous run or manual edit left dirty state).
+      become_user: ansible # in remote host
+
+    # track current image version in this file
+    - name: Ensure version file exists
+      file:
+        path: /home/ansible/flaskapp/.version
+        state: touch
+        owner: ansible # in remote host
+        group: ansible # in remote host
+        mode: '0644'
+
+    - name: Read current version
+      command: cat /home/ansible/flaskapp/.version
+      register: version_output
+      failed_when: false # Avoid failing if file doesn't exist (first-time safe)
+      changed_when: false # just a read-only task, no "change" to report
+      become_user: ansible
+
+    # set the fact # accessible throughout the below tasks
+    # # no content in version file, default version 1, next build --> increment by 1
+    - name: Set new version
+      set_fact:
+        new_version: "{{ (version_output.stdout | int(default=0)) + 1 }}" 
+
+    # save the version info in a file --> so that it can be used in other playbooks
+    - name: Save new version to file
+      copy:
+        content: "{{ new_version }}"
+        dest: /home/ansible/flaskapp/.version
+        owner: ansible
+        group: ansible
+        mode: '0644'
+      become_user: ansible
+
+    # the credentials are configured with the ansible vault
+    # - name: Login to Docker Hub
+    #   docker_login:
+    #     username: "{{ dockerhub_username }}"
+    #     password: "{{ dockerhub_password }}"
+
+    - name: Docker login
+      shell: echo "{{ dockerhub_password }}" | docker login -u "{{ dockerhub_username }}" --password-stdin
+
+    # - name: Build and push versioned Docker image
+    #   docker_image:
+    #     build:
+    #       path: /home/ansible/flaskapp # in remote host 
+    #     name: "{{ dockerhub_username }}/{{ docker_image_name }}" # fetched from cred and vars files
+    #     tag: "{{ new_version }}" # fetching from the fact
+    #     state: present
+    #     source: local
+    #     push: true # image will be pushed
+
+
+# Image pushing takes time, Waiting state for some while due to slow uploading bandwidth
+# ansible thinks job not successfull and marks unhealthy
+# troubleshooting this way
+
+    - name: Build and Push Docker image (async)     
+      shell: >
+        docker build -t {{ dockerhub_username }}/{{ docker_image_name }}:{{ new_version }} /home/ansible/flaskapp &&
+        docker push {{ dockerhub_username }}/{{ docker_image_name }}:{{ new_version }}
+      async: 600      # allow up to 10 minutes
+      poll: 0         # run in background
+      register: docker_job
+
+
+    - name: Wait for Docker push to finish
+      async_status:
+        jid: "{{ docker_job.ansible_job_id }}"
+      register: docker_result   
+      until: docker_result.finished
+      retries: 30     # retry every 10 seconds
+      delay: 10
+
+    # for testing and troubleshooting
+    - debug:
+        var: docker_result.stdout_lines
+    - debug:
+        var: docker_result.stderr_lines
+
+    # - name: Push latest tag
+    #   docker_image:
+    #     name: "{{ dockerhub_username }}/{{ docker_image_name }}"
+    #     tag: latest
+    #     state: present
+    #     source: local
+    #     push: true
+
+    - name: Tag the image to latest and push the latest tag    
+      shell: >
+        docker tag {{ dockerhub_username }}/{{ docker_image_name }}:{{ new_version }} {{ dockerhub_username }}/{{ docker_image_name }}:latest &&
+        docker push {{ dockerhub_username }}/{{ docker_image_name }}:latest
+      async: 600      # allow up to 10 minutes
+      poll: 0         # run in background
+      register: docker_job2
+
+    - name: Wait for Docker push to finish (latest tag)
+      async_status:
+        jid: "{{ docker_job2.ansible_job_id }}"
+      register: docker_result2   
+      until: docker_result2.finished
+      retries: 30     # retry every 10 seconds
+      delay: 10
+
+
+## might see both stdout and stderr
+## because getting success after repeated failed attempt
+    # for testing and troubleshooting
+    - debug:
+        var: docker_result2.stdout_lines
+    - debug:
+        var: docker_result2.stderr_lines
+
+
+    # module facing errors trying to connect docker daemon
+    # # remove both the versions locally as k8s will pull the image from dockerhub
+    # - name: Remove versioned image locally
+    #   docker_image:
+    #     name: "{{ dockerhub_username }}/{{ docker_image_name }}"
+    #     tag: "{{ new_version }}"
+    #     state: absent
+
+    # - name: Remove latest image locally
+    #   docker_image:
+    #     name: "{{ dockerhub_username }}/{{ docker_image_name }}"
+    #     tag: "latest"
+    #     state: absent
+
+
+# we can use direct docker cli in shell
+    # remove both the versions locally as k8s will pull the image from dockerhub
+    - name: Remove versioned image locally
+      shell: docker rmi {{ dockerhub_username }}/{{ docker_image_name }}:{{ new_version }} || true
+
+    - name: Remove latest image locally
+      shell: docker rmi {{ dockerhub_username }}/{{ docker_image_name }}:latest || true

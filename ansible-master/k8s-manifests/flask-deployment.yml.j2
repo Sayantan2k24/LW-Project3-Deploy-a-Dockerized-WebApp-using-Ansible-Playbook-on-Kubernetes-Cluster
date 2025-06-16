@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ app_name | default('flask-app') }}
+  labels:
+    app: {{ app_name | default('flask-app') }}
+    version: "{{ image_version | default('latest') }}"
+  namespace: {{ k8s_namespace | default('default') }}
+spec:
+  replicas: {{ app_replicas | default(2) }}
+  selector:
+    matchLabels:
+      app: {{ app_name | default('flask-app') }}
+  template:
+    metadata:
+      labels:
+        app: {{ app_name | default('flask-app') }}
+        version: "{{ image_version | default('latest') }}"
+    spec:
+      containers:
+        - name: {{ app_name | default('flask-app') }}-container
+          image: {{ dockerhub_username }}/{{ docker_image_name }}:{{ image_version | default('latest') }}
+          ports:
+            - containerPort: {{ app_port | default(5000) }}
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          env:
+            - name: FLASK_ENV
+              value: "{{ flask_env | default('production') }}"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ app_port | default(5000) }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ app_port | default(5000) }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ app_name | default('flask-app') }}-service
+  namespace: {{ k8s_namespace | default('default') }}
+  labels:
+    app: {{ app_name | default('flask-app') }}
+spec:
+  selector:
+    app: {{ app_name | default('flask-app') }}
+  type: {{ service_type | default('LoadBalancer') }}  # EKS supports LoadBalancer
+  ports:
+    - protocol: TCP
+      port: {{ service_port | default(80) }}
+      targetPort: {{ app_port | default(5000) }}
+{% if service_type == 'NodePort' %}
+      nodePort: {{ node_port | default(30080) }}
+{% endif %}

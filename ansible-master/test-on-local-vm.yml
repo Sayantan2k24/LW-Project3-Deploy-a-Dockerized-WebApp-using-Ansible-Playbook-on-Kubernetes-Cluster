@@ -1,0 +1,62 @@
+- name: Deploy Flask App to EKS with Dynamic Version Update
+  hosts: localVM
+  become: false
+  vars_files:
+    - vars/docker_vars.yml
+    - vars/k8s_vars.yml
+    - dockerhub_creds.yml
+
+  tasks:
+    # Read the version from the image builder node
+    - name: Read current version from image builder
+      slurp:
+        src: /home/ansible/flaskapp/.version
+      register: version_file_content
+      delegate_to: "{{ groups['image_builder'][0] }}"
+
+    - name: Set image version from file
+      set_fact:
+        image_version: "{{ version_file_content.content | b64decode | trim }}"
+
+    - name: Display current image version
+      debug:
+        msg: "Deploying image version: {{ image_version }}"
+
+    # Ensure k8s manifests directory exists
+    - name: Create k8s manifests directory
+      file:
+        path: /root/k8s-manifests
+        state: directory
+        mode: '0755'
+    
+
+    # Remove older deployment
+    - name: Check if the deployment exists
+      shell: "kubectl get deployment {{ app_name }} -n {{ k8s_namespace }}"
+      register: deploy_status
+      ignore_errors: true
+
+    - name: Delete old deployment and service
+      command: kubectl delete -f /root/k8s-manifests/flask-deployment.yml
+      when: deploy_status.rc == 0
+      ignore_errors: true
+      register: destroy_status
+
+    - debug:
+        var: destroy_status
+ 
+
+    # Generate the deployment file with current version
+    - name: Generate Kubernetes deployment manifest
+      template:
+        src: k8s-manifests/flask-deployment.yml.j2
+        dest: /root/k8s-manifests/flask-deployment.yml
+        mode: '0644'
+
+    # kubectl command
+    # apply the deployment
+    - name: Apply deployment using kubectl
+      shell: kubectl apply -f /root/k8s-manifests/flask-deployment.yml
+      register: kubectl_result
+      when: true # Set to true if you want to use kubectl instead
+    # apply should run always , in any condition

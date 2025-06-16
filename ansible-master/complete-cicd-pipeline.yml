@@ -1,0 +1,3 @@
+# complete-cicd-pipeline.yml
+- import_playbook: build-push.yaml
+- import_playbook: flask-ansible-deploy-k8s.yml

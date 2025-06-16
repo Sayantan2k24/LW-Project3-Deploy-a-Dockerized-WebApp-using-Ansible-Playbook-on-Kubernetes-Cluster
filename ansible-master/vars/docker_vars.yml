@@ -1,0 +1,5 @@
+# vars/docker_vars.yml
+
+app_repo_url: "https://github.com/Sayantan2k24/flask-ansible-deploy-k8s.git"
+app_branch: "main"
+docker_image_name: "flask-ansible-deploy-k8s"
