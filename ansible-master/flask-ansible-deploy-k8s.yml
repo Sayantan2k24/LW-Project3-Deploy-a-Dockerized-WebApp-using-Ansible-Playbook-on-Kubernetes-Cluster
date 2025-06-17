@@ -36,14 +36,14 @@
       register: deploy_status
       ignore_errors: true
 
-    - name: Delete old deployment and service
-      command: kubectl delete -f /home/k8sclient/k8s-manifests/flask-deployment.yml
-      when: deploy_status.rc == 0
-      ignore_errors: true
-      register: destroy_status
+    # - name: Delete old deployment and service
+    #   command: kubectl delete -f /home/k8sclient/k8s-manifests/flask-deployment.yml
+    #   when: deploy_status.rc == 0
+    #   ignore_errors: true
+    #   register: destroy_status
 
-    - debug:
-        var: destroy_status
+    # - debug:
+    #     var: destroy_status
 
 
     # Generate the deployment file with current version
