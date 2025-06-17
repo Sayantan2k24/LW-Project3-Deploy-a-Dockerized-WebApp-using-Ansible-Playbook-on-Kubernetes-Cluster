@@ -7,6 +7,11 @@ metadata:
     version: "{{ image_version | default('latest') }}"
   namespace: {{ k8s_namespace | default('default') }}
 spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   replicas: {{ app_replicas | default(2) }}
   selector:
     matchLabels:
