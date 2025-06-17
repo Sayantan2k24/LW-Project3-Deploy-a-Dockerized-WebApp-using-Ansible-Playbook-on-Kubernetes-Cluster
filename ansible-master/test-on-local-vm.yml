@@ -35,17 +35,7 @@
       shell: "kubectl get deployment {{ app_name }} -n {{ k8s_namespace }}"
       register: deploy_status
       ignore_errors: true
-
-    - name: Delete old deployment and service
-      command: kubectl delete -f /root/k8s-manifests/flask-deployment.yml
-      when: deploy_status.rc == 0
-      ignore_errors: true
-      register: destroy_status
-
-    - debug:
-        var: destroy_status
  
-
     # Generate the deployment file with current version
     - name: Generate Kubernetes deployment manifest
       template:
